@@ -15,6 +15,23 @@
 		}
 	</style>
 	<script>
+		let texts = [];
+
+		function processText(buffer) {
+			let dataView = new DataView(buffer);
+			let textDecoder = new TextDecoder("ascii");
+			let count = dataView.getUint32(0x54, true);
+			for (let i = 0; i < count; i++) {
+				let offset = dataView.getUint32(0x80 + i * 8, true);
+				if (offset != 0) {
+					let length = dataView.getUint32(0x84 + i * 8, true);
+					let stringBytes = new Uint8Array(buffer, offset, length - 1);
+					texts[i] = textDecoder.decode(stringBytes);
+					console.log(i + ": " + texts[i]);
+				}
+			}
+		}
+
 		function readGamedatContents(buffer) {
 			let dataByFilename = {};
 			
@@ -56,6 +73,7 @@
 				}
 
 				let item = {};
+				item.byteLength = itemByteLength;
 				item.x = dataView.getUint8(position + 0);
 				item.y = dataView.getUint8(position + 1);
 				item.shapeAndFrame = dataView.getUint16(position + 2, true);
@@ -112,7 +130,10 @@
 			for (item of items) {
 				let itemDiv = document.createElement("div");
 				itemDiv.classList.add("item");
-				itemDiv.innerHTML = item.shape;
+				itemDiv.innerHTML = item.byteLength + " " + item.shape;
+				if (texts[item.shape]) {
+					itemDiv.innerHTML += " " + texts[item.shape];
+				}
 
 				if (item.contents) {
 					let contentsDiv = document.createElement("div");
@@ -134,19 +155,22 @@
 			listItems(itemsDiv, items);
 		}
 
-		window.addEventListener("load", e => {
-			let fileInput = document.getElementById("gamedatFileInput");
-			fileInput.addEventListener("change", e => {
+		function acceptFileInput(fileInput, callback) {
+			fileInput.addEventListener("change", changeEvent => {
 				let reader = new FileReader();
-				reader.addEventListener("load", e => {
-					processGamedat(reader.result);
-				});
+				reader.addEventListener("load", () => callback(reader.result));
 				reader.readAsArrayBuffer(fileInput.files[0]);
 			});
+		}
+
+		window.addEventListener("load", e => {
+			acceptFileInput(document.getElementById("textFileInput"), processText);
+			acceptFileInput(document.getElementById("gamedatFileInput"), processGamedat);
 		});
 	</script>
 </head>
 <body>
+	<input id="textFileInput" type="file"></input>
 	<input id="gamedatFileInput" type="file"></input>
 	<div id="items"></div>
 </body>
