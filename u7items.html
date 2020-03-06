@@ -1,0 +1,154 @@
+<html>
+<head>
+	<style>
+		.item {
+			position: relative;
+			margin: 10px;
+			background: gray;
+		}
+
+		.contents {
+			position: relative;
+			left: 20px;
+			margin: 10px;
+			background: white;
+		}
+	</style>
+	<script>
+		function readGamedatContents(buffer) {
+			let dataByFilename = {};
+			
+			let dataView = new DataView(buffer);
+			let decoder = new TextDecoder("ascii");
+			let indexOffset = 0x80;
+			while (true) {
+				let filenameOffset = dataView.getUint32(indexOffset, true);
+				if (filenameOffset == 0) {
+					break;
+				}
+
+				let totalLength = dataView.getUint32(indexOffset + 4, true);
+
+				let filename =
+						decoder.decode(new Uint8Array(buffer, filenameOffset, 13))
+						.replace(/\u0000.*$/, "");
+
+				let dataStart = filenameOffset + 13;
+				let dataEnd = filenameOffset + totalLength;
+				let data = buffer.slice(dataStart, dataEnd);
+
+				dataByFilename[filename] = data;
+
+				indexOffset += 8;
+			}
+
+			return dataByFilename;
+		}
+
+		function readItems(dataView) {
+			let items = [];
+
+			let position = 0;
+			while (position < dataView.byteLength) {
+				let itemByteLength = dataView.getUint8(position++);
+				if (itemByteLength == 0 || itemByteLength == 1) {
+					break;
+				}
+
+				let item = {};
+				item.x = dataView.getUint8(position + 0);
+				item.y = dataView.getUint8(position + 1);
+				item.shapeAndFrame = dataView.getUint16(position + 2, true);
+				item.shape = item.shapeAndFrame & 0x3FF;
+				item.frame = item.shapeAndFrame - item.shape;
+
+				position += itemByteLength;
+				
+				if (itemByteLength == 12) {
+					let contentsDataView =
+							new DataView(dataView.buffer, dataView.byteOffset + position);
+					let [ contents, contentsByteLength ] = readItems(contentsDataView);
+					item.contents = contents;
+					position += contentsByteLength;
+				}
+
+				items.push(item);
+			}
+
+			return [ items, position ];
+		}
+
+		function readItemsFromIregs(dataByFilename) {
+			let items = [];
+
+			for (let regionY = 0; regionY < 12; regionY++) {
+				for (let regionX = 0; regionX < 12; regionX++) {
+					let regionNumber = regionY * 12 + regionX;
+
+					let filename = "U7IREG"
+							+ regionNumber.toString(16).padStart(2, "0").toUpperCase();
+
+					let regionBuffer = dataByFilename[filename];
+
+					console.log(filename + ": " + regionBuffer.byteLength);
+
+					let chunkStart = 0;
+					let regionItems = []
+					for (let iChunk = 0; iChunk < 16 * 16; iChunk++) {
+						let chunkDataView = new DataView(regionBuffer, chunkStart);
+						let [ chunkItems, chunkByteLength ] = readItems(chunkDataView);
+						regionItems.push(...chunkItems);
+						chunkStart += chunkByteLength;
+					}
+
+					items.push(...regionItems);
+				}
+			}
+
+			return items;
+		}
+
+		function listItems(parent, items) {
+			for (item of items) {
+				let itemDiv = document.createElement("div");
+				itemDiv.classList.add("item");
+				itemDiv.innerHTML = item.shape;
+
+				if (item.contents) {
+					let contentsDiv = document.createElement("div");
+					contentsDiv.classList.add("contents");
+					listItems(contentsDiv, item.contents);
+					itemDiv.appendChild(contentsDiv);
+				}
+
+				parent.appendChild(itemDiv);
+			}
+		}
+
+		function processGamedat(buffer) {
+			let dataByFilename = readGamedatContents(buffer);
+
+			let items = readItemsFromIregs(dataByFilename);
+
+			let itemsDiv = document.getElementById("items");
+			listItems(itemsDiv, items);
+		}
+
+		window.addEventListener("load", e => {
+			let fileInput = document.getElementById("gamedatFileInput");
+			fileInput.addEventListener("change", e => {
+				let reader = new FileReader();
+				reader.addEventListener("load", e => {
+					processGamedat(reader.result);
+				});
+				reader.readAsArrayBuffer(fileInput.files[0]);
+			});
+		});
+	</script>
+</head>
+<body>
+	<input id="gamedatFileInput" type="file"></input>
+	<div id="items"></div>
+</body>
+</html>
+
